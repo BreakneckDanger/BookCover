@@ -216,4 +216,147 @@ with tab_auto:
                     fill=accent_color if not banner_bg else text_color,
                     font=font_auth,
                     anchor="mm",
-                    
+                    stroke_width=8,
+                    stroke_fill=bg_color if not banner_bg else accent_color
+                )
+
+        # 3. Place Back Cover Sample Pages & Blurb
+        back_center_x = bleed_px + (back_trim_px // 2)
+        if back_blurb:
+            font_blurb = get_font(90)
+            draw.text(
+                (back_center_x, bleed_px + 380),
+                back_blurb,
+                fill=accent_color,
+                font=font_blurb,
+                anchor="mm"
+            )
+
+        if back_samples:
+            num_samples = min(3, len(back_samples))
+            card_w = 1150 if num_samples <= 2 else 920
+            card_h = round(card_w * (11.0 / 8.5))
+            spacing = 120
+            total_row_w = (num_samples * card_w) + ((num_samples - 1) * spacing)
+            start_card_x = back_center_x - (total_row_w // 2)
+            card_y = (full_height_px // 2) - (card_h // 2) - 100
+
+            for idx, sample_file in enumerate(back_samples[:3]):
+                s_img = Image.open(sample_file).convert("RGB")
+                s_fitted = ImageOps.fit(s_img, (card_w, card_h), method=Image.Resampling.LANCZOS)
+                # Add crisp white frame & border around sample page
+                framed = ImageOps.expand(s_fitted, border=24, fill=accent_color)
+                framed = ImageOps.expand(framed, border=4, fill="#222222")
+                cx = start_card_x + idx * (card_w + spacing)
+                canvas.paste(framed, (cx, card_y))
+
+        # 4. Create Preview Image (with optional KDP Guides)
+        preview_img = canvas.copy()
+        if show_guides:
+            p_draw = ImageDraw.Draw(preview_img)
+            # Red Outer Bleed Boundary (0.125" inside edges)
+            p_draw.rectangle([bleed_px, bleed_px, full_width_px - bleed_px, full_height_px - bleed_px], outline="#FF3B30", width=10)
+            # Blue Spine Fold Lines
+            p_draw.line([(left_spine_x, 0), (left_spine_x, full_height_px)], fill="#007AFF", width=10)
+            p_draw.line([(right_spine_x, 0), (right_spine_x, full_height_px)], fill="#007AFF", width=10)
+            # Yellow KDP Barcode Reserved Zone on Back Cover (2.0" x 1.2" box, 0.25" from spine & bottom trim)
+            bc_w = round(2.0 * DPI)
+            bc_h = round(1.2 * DPI)
+            bc_x2 = left_spine_x - round(0.25 * DPI)
+            bc_y2 = full_height_px - bleed_px - round(0.25 * DPI)
+            p_draw.rectangle([bc_x2 - bc_w, bc_y2 - bc_h, bc_x2, bc_y2], fill="#FFF3CD", outline="#FF9500", width=8)
+            p_draw.text((bc_x2 - (bc_w // 2), bc_y2 - (bc_h // 2)), "KDP BARCODE ZONE", fill="#000000", font=get_font(55), anchor="mm")
+
+        st.image(preview_img, caption=f"Live Full-Wrap Cover Preview ({full_width_px} x {full_height_px} px @ 400 DPI)", use_container_width=True)
+
+        # 5. Export Buttons (Always exports the CLEAN canvas without guide lines!)
+        st.markdown("##### ⬇️ Download Print-Ready Files (Guides Automatically Removed)")
+        dl1, dl2 = st.columns(2)
+
+        pdf_buf = io.BytesIO()
+        canvas.save(pdf_buf, format="PDF", resolution=float(DPI))
+        dl1.download_button(
+            "📄 Download KDP Print-Ready PDF (400 DPI)",
+            data=pdf_buf.getvalue(),
+            file_name=f"KDP_Full_Cover_{calc_page_count}pgs_400DPI.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+
+        png_buf = io.BytesIO()
+        canvas.save(png_buf, format="PNG", dpi=(DPI, DPI))
+        dl2.download_button(
+            "🖼️ Download Full-Wrap PNG (400 DPI)",
+            data=png_buf.getvalue(),
+            file_name=f"KDP_Full_Cover_{calc_page_count}pgs_400DPI.png",
+            mime="image/png",
+            use_container_width=True
+        )
+
+# ==============================================================================
+# TAB 2: STITCH PRE-MADE FRONT & BACK PANELS
+# ==============================================================================
+with tab_stitch:
+    st.subheader("🖼️ Stitch Pre-Made Front & Back Panels")
+    st.write(f"If you already designed a Front Cover (`{front_width_px} x {front_height_px} px`) and Back Cover elsewhere, upload them here to stitch them together.")
+    u_col1, u_col2, u_col3 = st.columns(3)
+    front_file = u_col1.file_uploader("Upload Finished Front Cover", type=["png", "jpg", "jpeg"], key="stitch_front")
+    back_file = u_col2.file_uploader("Upload Finished Back Cover (Optional)", type=["png", "jpg", "jpeg"], key="stitch_back")
+    stitch_bg = u_col3.color_picker("Fallback Spine / Back Color", "#FFFFFF", key="stitch_bg")
+
+    if front_file:
+        stitch_canvas = Image.new("RGB", (full_width_px, full_height_px), stitch_bg)
+        if back_file:
+            b_img = Image.open(back_file).convert("RGB").resize((front_width_px, front_height_px), Image.Resampling.LANCZOS)
+            stitch_canvas.paste(b_img, (0, 0))
+        f_img = Image.open(front_file).convert("RGB").resize((front_width_px, front_height_px), Image.Resampling.LANCZOS)
+        stitch_canvas.paste(f_img, (full_width_px - front_width_px, 0))
+
+        st.image(stitch_canvas, caption="Stitched Full Wrap Cover", use_container_width=True)
+        
+        s_pdf = io.BytesIO()
+        stitch_canvas.save(s_pdf, format="PDF", resolution=float(DPI))
+        st.download_button(
+            "⬇️ Download Stitched Print-Ready PDF (400 DPI)",
+            data=s_pdf.getvalue(),
+            file_name=f"Stitched_KDP_Cover_{calc_page_count}pgs_400DPI.pdf",
+            mime="application/pdf"
+        )
+
+# ==============================================================================
+# TAB 3: DOWNLOAD BLANK GUIDE TEMPLATES
+# ==============================================================================
+with tab_guides:
+    st.subheader("📥 Download Blank 400 DPI Guide Templates")
+    st.write("Want to design inside Procreate, Photoshop, or Canva? Download these exact 400 DPI templates with pre-drawn bleed and spine lines.")
+    
+    def make_guide(is_full=True):
+        w = full_width_px if is_full else front_width_px
+        h = full_height_px if is_full else front_height_px
+        g_img = Image.new("RGB", (w, h), "white")
+        g_draw = ImageDraw.Draw(g_img)
+        g_draw.rectangle([bleed_px, bleed_px, w - bleed_px, h - bleed_px], outline="#FF3B30", width=8)
+        if is_full:
+            g_draw.line([(left_spine_x, 0), (left_spine_x, h)], fill="#007AFF", width=8)
+            g_draw.line([(right_spine_x, 0), (right_spine_x, h)], fill="#007AFF", width=8)
+        else:
+            half_sp_px = round(half_spine_in * DPI)
+            g_draw.line([(half_sp_px, 0), (half_sp_px, h)], fill="#007AFF", width=8)
+        return g_img
+
+    g_col1, g_col2 = st.columns(2)
+    with g_col1:
+        if st.button("Generate Full Wrap Template"):
+            tpl = make_guide(True)
+            st.image(tpl, use_container_width=True)
+            b = io.BytesIO()
+            tpl.save(b, format="PNG", dpi=(DPI, DPI))
+            st.download_button("⬇️ Download Full Wrap PNG", b.getvalue(), f"Template_Full_{calc_page_count}pgs.png", "image/png")
+    with g_col2:
+        if st.button("Generate Front Panel Template"):
+            tpl = make_guide(False)
+            st.image(tpl, use_container_width=True)
+            b = io.BytesIO()
+            tpl.save(b, format="PNG", dpi=(DPI, DPI))
+            st.download_button("⬇️ Download Front Panel PNG", b.getvalue(), f"Template_Front_{calc_page_count}pgs.png", "image/png")
+            
